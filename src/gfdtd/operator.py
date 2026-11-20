@@ -714,6 +714,18 @@ def _core(csx, fdtd):
                     m = edge_mask(q, a, grid)
                     sheet_of[a][m & (q.priority > pec[a])] = sid
                     np.maximum(pec[a], np.where(m, q.priority, -np.inf), out=pec[a])
+    # (fpv_antenna patch 2, ported) a material of higher priority than every metal at an edge's midpoint takes the
+    # edge, as in openEMS (CSXCAD's GetPropertyByCoordPriority): a metal block with a drilled hole (a material of
+    # higher priority) is not solid
+    for pr, p, q in mats:
+        if isinstance(q, C.Polygon) and not isinstance(q, C.LinPoly):
+            continue
+        for a in range(3):
+            cand = (pec[a] > -np.inf) & (pec[a] < pr)
+            if cand.any():
+                hit = cand & edge_mask(q, a, grid)
+                pec[a][hit] = -np.inf
+                sheet_of[a][hit] = -1
     # lumped elements: parallel R / C into G / C of the edges, parallel L and series RLC as edge branches
     op.par_L, op.series = [], []
     lumped = [(q.priority, p, q) for p in props if isinstance(p, C.LumpedElement) for q in p.primitives]
@@ -803,6 +815,7 @@ def _core(csx, fdtd):
         sheet_m &= ~near[None]
         sheet_of[~sheet_m] = -1
     pec_m &= ~sheet_m                                               # from here on: PEC only
+    op.pec_mask = pec_m                                             # (fpv_antenna patch 3) connectivity checks
     op.n_pec = [int(pec_m[a].sum()) for a in range(3)]
     op.n_sheet = int(sheet_m.sum())
     rl = _sheet_edges(sheets, sheet_of, sheet_m, grid, lE, dt, float(fdtd['f0']) + float(fdtd['fc']), op.notes)
